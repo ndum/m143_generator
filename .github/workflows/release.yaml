@@ -1,0 +1,84 @@
+name: Build and Release Go App
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Binaries
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - name: Build the Go app
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p build
+          export CGO_ENABLED=0
+          go build -ldflags "-w -s" -o build/m143_generator_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
+
+      - name: Archive the build output (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          cd build
+          Compress-Archive -Path "m143_generator_${{ matrix.goos }}_${{ matrix.goarch }}.exe" -DestinationPath "m143_generator_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
+
+      - name: Archive the build output (Linux)
+        if: runner.os != 'Windows'
+        run: |
+          cd build
+          zip "m143_generator_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "m143_generator_${{ matrix.goos }}_${{ matrix.goarch }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build_artifacts
+          path: build/*.zip
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build_artifacts
+          path: build
+
+      - name: List files for debugging
+        run: ls -R build
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
